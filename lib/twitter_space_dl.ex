@@ -50,7 +50,8 @@ defmodule TwitterSpaceDL do
         get_url = @audio_space_metadata_endpoint <> params
         with %HTTPotion.Response{body: body, status_code: 200} <-
                HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table)),
-             meta = Jason.decode!(body),
+             meta <- Jason.decode!(body, keys: :atoms),
+             %{data: %{audioSpace: %{metadata: %{media_key: media_key}}}} <- meta,
              true <- :ets.insert(ets_table, {"metadata", meta})
         do
           meta
