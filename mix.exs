@@ -20,7 +20,8 @@ defmodule TwspaceDl.MixProject do
 
   defp deps do
     [
-      {:httpotion, "~> 3.1.0"}
+      {:httpotion, "~> 3.1.0"},
+      {:jason, "~> 1.2"}
     ]
   end
 end
