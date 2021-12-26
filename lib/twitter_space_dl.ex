@@ -19,7 +19,10 @@ defmodule TwitterSpaceDL do
   @guest_token "guest_token"
 
   def download(self_pid) do
-    GenServer.call(self_pid, :download)
+    if nil == System.find_executable("ffmpeg") do
+      raise "cannot find ffmpeg"
+    end
+    GenServer.call(self_pid, :download, :infinity)
   end
 
   @impl true
@@ -37,9 +40,13 @@ defmodule TwitterSpaceDL do
   end
 
   @impl true
-  def handle_call(:download, _from, state = %{space_id: space_id, ets_table: ets_table}) do
+  def handle_call(:download, _from, state = %{space_id: space_id, ets_table: ets_table, template: template}) do
     playlist = playlist_content(space_id, ets_table)
-    {:reply, playlist, state}
+    filename = filename(space_id, ets_table, template)
+    dyn_playlist = dyn_url(space_id, ets_table)
+    {:ok, %{data: %{audioSpace: %{metadata: %{state: space_state, title: title}}}}} = metadata(space_id, ets_table)
+
+    {:reply, _download(System.find_executable("ffmpeg"), filename, playlist, dyn_playlist, title, space_state), state}
   end
 
   defp from_space_url(url) when is_binary(url) do
@@ -51,18 +58,76 @@ defmodule TwitterSpaceDL do
     end
   end
 
+  defp ffmpeg_arg(input, output, title) do
+    [
+      "-hide_banner",
+      "-y",
+      "-stats",
+      "-v",
+      "warning",
+      "-i",
+      input,
+      "-c",
+      "copy",
+      "-metadata",
+      "title=#{title}",
+      output
+    ]
+  end
+
+  defp _download(ffmpeg, filename, playlist, dyn_playlist, title, space_state) do
+    m3u8_filename = write_playlist(filename, playlist)
+    m4a_filename = filename <> ".m4a"
+    m4a_live_filename = filename <> "_live.m4a"
+
+    download_recorded =
+      ffmpeg_arg(m3u8_filename, m4a_filename, title)
+      |> List.insert_at(1, "-protocol_whitelist")
+      |> List.insert_at(2, "file,https,tls,tcp")
+
+    pipeline = if space_state == "Running" do
+      concat_txt = "#{title}-concat.txt"
+      download_live = ffmpeg_arg(dyn_playlist, m4a_live_filename, title)
+      merge_file =
+        ffmpeg_arg(concat_txt, m4a_filename, title)
+        |> List.insert_at(1, "-f")
+        |> List.insert_at(2, "concat")
+        |> List.insert_at(3, "-safe")
+        |> List.insert_at(4, "0")
+      [download_live, download_recorded, merge_file]
+    else
+      [download_recorded]
+    end
+
+    _download(ffmpeg, pipeline)
+  end
+
+  defp _download(_ffmpeg, []), do: :ok
+  defp _download(ffmpeg, [args | rest]) do
+    port = Port.open({:spawn_executable, ffmpeg},
+      [:binary, :exit_status, args: args])
+
+    receive do
+      {^port, {:exit_status, 0}} -> nil
+      {^port, {:exit_status, status}} -> Logger.warn("ffmpeg exit with status: #{exit_status}")
+      {^port, {:data, stdout}} -> IO.puts(Regex.replace(~r/\n/, stdout, "\r\n"))
+    end
+    _download(ffmpeg, rest)
+  end
+
   defp filename(space_id, ets_table, template) do
     with [[@filename, filename] | _] <- :ets.lookup(ets_table, @filename)
     do
       filename
     else
-      {:ok, %{data: %{audioSpace: %{metadata: meta}}}} = metadata(space_id, ets_table)
-      filename =
-        ~r/\%\{(\w*)\}/
-        |> Regex.scan(template)
-        |> format_template(template, meta)
-      true = :ets.insert(ets_table, {@filename, filename})
-      filename
+      [] ->
+        {:ok, %{data: %{audioSpace: %{metadata: meta}}}} = metadata(space_id, ets_table)
+        filename =
+          ~r/\%\{(\w*)\}/
+          |> Regex.scan(template)
+          |> format_template(template, meta)
+        true = :ets.insert(ets_table, {@filename, filename})
+        filename
     end
   end
 
@@ -71,20 +136,28 @@ defmodule TwitterSpaceDL do
     format_template(rest,
       raw
       |> Regex.compile!()
-      |> Regex.replace(template, Map.get(meta, String.to_atom(key), "")))
+      |> Regex.replace(template, Map.get(meta, String.to_atom(key), "")), meta)
+  end
+
+  defp write_playlist(formatted_filename, playlist) do
+    output_filename = formatted_filename <> ".m3u8"
+    {:ok, file} = File.open(output_filename, [:write])
+    :ok = IO.binwrite(file, playlist)
+    :ok = File.close(file)
+    output_filename
   end
 
   defp playlist_content(space_id, ets_table) do
-    with {:ok, playlist_url} = playlist_url(space_id, ets_table),
-         {:ok, master_url} = master_url(space_id, ets_table),
+    {:ok, playlist_url_str} = playlist_url(space_id, ets_table)
+    with {:ok, master_url} = master_url(space_id, ets_table),
          url_base = Regex.replace(~r/master_playlist.m3u8.*/, master_url, ""),
          %HTTPotion.Response{body: body, status_code: 200} <-
-           HTTPotion.get(playlist_url, follow_redirects: true)
+           HTTPotion.get(playlist_url_str, follow_redirects: true)
     do
       Regex.replace(~r/chunk_/, body, "#{url_base}chunk_")
     else
       _ ->
-        msg = "cannot fetch playlist: #{playlist_url}"
+        msg = "cannot fetch playlist: #{playlist_url_str}"
         Logger.error(msg)
         raise msg
     end
@@ -96,8 +169,7 @@ defmodule TwitterSpaceDL do
            HTTPotion.get(master_playlist, follow_redirects: true),
          [_, _, _, suffix | _] <- String.split(body, "\n"),
          %URI{host: host} <- URI.parse(master_playlist),
-         playlist <- "https://#{host}#{suffix}",
-         true <- :ets.insert(ets_table, {@playlist_url, playlist})
+         playlist <- "https://#{host}#{suffix}"
     do
       {:ok, playlist}
     else
@@ -171,7 +243,7 @@ defmodule TwitterSpaceDL do
         with %HTTPotion.Response{body: body, status_code: 200} <-
                HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table)),
              meta <- Jason.decode!(body, keys: :atoms),
-             %{data: %{audioSpace: %{metadata: %{media_key: media_key}}}} <- meta,
+             %{data: %{audioSpace: %{metadata: %{media_key: _media_key}}}} <- meta,
              true <- :ets.insert(ets_table, {@metadata, meta})
         do
           {:ok, meta}
