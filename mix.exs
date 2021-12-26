@@ -17,7 +17,7 @@ defmodule TwspaceDl.MixProject do
 
   def application do
     [
-      applications: [:httpotion],
+      applications: [:httpotion, :jason],
       extra_applications: [:logger]
     ]
   end
