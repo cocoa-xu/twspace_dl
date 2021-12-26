@@ -1,8 +1,4 @@
-defmodule TwspaceDlTest do
+defmodule TwitterSpaceDLTest do
   use ExUnit.Case
-  doctest TwspaceDl
-
-  test "greets the world" do
-    assert TwspaceDl.hello() == :world
-  end
+  doctest TwitterSpaceDL
 end
