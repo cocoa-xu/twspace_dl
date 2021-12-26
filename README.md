@@ -3,21 +3,21 @@
 Download Twitter Space Audio
 
 ## Example
-### Download by space url
+Download by space url
 ```elixir
 space = TwitterSpaceDL.new(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
 TwitterSpaceDL.download(space)
 ```
 
-### Download by space id
+Download by space id
 ```elixir
 space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb")
 TwitterSpaceDL.download(space)
 ```
 
-### Download by space id and use custom filename template
+Download by space id, use custom filename template and save to `download` directory
 ```elixir
-space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb", "space-%{title}-%{rest_id}-%{created_at}")
+space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb", "space-%{title}-%{rest_id}-%{created_at}", "./download")
 TwitterSpaceDL.download(space)
 ```
 

@@ -47,33 +47,41 @@ defmodule TwitterSpaceDL do
   **Return**: `pid`
 
   ## Example
-  ### Download by space url
+  Download by space url
   ```elixir
   space = TwitterSpaceDL.new(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
   TwitterSpaceDL.download(space)
   ```
 
-  ### Download by space id
+  Download by space id
   ```elixir
   space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb")
   TwitterSpaceDL.download(space)
   ```
 
-  ### Download by space id and use custom filename template
+  Download by space id, use custom filename template and save to `download` directory
   ```elixir
-  space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb", "space-%{title}-%{rest_id}-%{created_at}")
+  space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb", "space-%{title}-%{rest_id}-%{created_at}", "./download")
   TwitterSpaceDL.download(space)
   ```
   """
-  def new(source, id, template \\ @filename_template)
+  def new(source, id, template \\ @filename_template, save_dir \\ __DIR__)
 
-  def new(:space_id, id, template) do
-    {:ok, pid} = GenServer.start(__MODULE__, %{from_space_id: id, template: template})
+  def new(:space_id, id, template, save_dir) do
+    :ok = File.mkdir_p!(save_dir)
+
+    {:ok, pid} =
+      GenServer.start(__MODULE__, %{from_space_id: id, template: template, save_dir: save_dir})
+
     pid
   end
 
-  def new(:space_url, url, template) do
-    {:ok, pid} = GenServer.start(__MODULE__, %{from_space_url: url, template: template})
+  def new(:space_url, url, template, save_dir) do
+    :ok = File.mkdir_p!(save_dir)
+
+    {:ok, pid} =
+      GenServer.start(__MODULE__, %{from_space_url: url, template: template, save_dir: save_dir})
+
     pid
   end
 
@@ -92,21 +100,35 @@ defmodule TwitterSpaceDL do
   def init(arg = %{from_space_url: url}) do
     ets_table = :ets.new(:buckets_registry, [:set, :protected])
     template = Map.get(arg, :template, @filename_template)
-    {:ok, %{space_id: from_space_url(url), ets_table: ets_table, template: template}}
+    save_dir = Map.get(arg, :save_dir, __DIR__)
+
+    {:ok,
+     %{
+       space_id: from_space_url(url),
+       ets_table: ets_table,
+       template: template,
+       save_dir: save_dir
+     }}
   end
 
   @impl true
   def init(arg = %{from_space_id: space_id}) when is_binary(space_id) do
     ets_table = :ets.new(:buckets_registry, [:set, :protected])
     template = Map.get(arg, :template, @filename_template)
-    {:ok, %{space_id: space_id, ets_table: ets_table, template: template}}
+    save_dir = Map.get(arg, :save_dir, __DIR__)
+    {:ok, %{space_id: space_id, ets_table: ets_table, template: template, save_dir: save_dir}}
   end
 
   @impl true
   def handle_call(
         :download,
         _from,
-        state = %{space_id: space_id, ets_table: ets_table, template: template}
+        state = %{
+          space_id: space_id,
+          ets_table: ets_table,
+          template: template,
+          save_dir: save_dir
+        }
       ) do
     playlist = playlist_content(space_id, ets_table)
     filename = filename(space_id, ets_table, template)
@@ -122,7 +144,8 @@ defmodule TwitterSpaceDL do
        playlist,
        dyn_playlist,
        title,
-       space_state
+       space_state,
+       save_dir
      ), state}
   end
 
@@ -154,10 +177,11 @@ defmodule TwitterSpaceDL do
     ]
   end
 
-  defp _download(ffmpeg, filename, playlist, dyn_playlist, title, space_state) do
+  defp _download(ffmpeg, filename, playlist, dyn_playlist, title, space_state, save_dir) do
     m3u8_filename = write_playlist(filename, playlist)
     m4a_filename = filename <> ".m4a"
     m4a_live_filename = filename <> "_live.m4a"
+    concat_txt = "#{title}-concat.txt"
 
     download_recorded =
       ffmpeg_arg(m3u8_filename, m4a_filename, title)
@@ -166,7 +190,11 @@ defmodule TwitterSpaceDL do
 
     pipeline =
       if space_state == "Running" do
-        concat_txt = "#{title}-concat.txt"
+        {:ok, file} = File.open(concat_txt, [:write])
+        save_dir_abs = Path.expand(save_dir)
+        :ok = IO.binwrite(file, "file " <> Path.join(save_dir_abs, m4a_filename) <> "\n")
+        :ok = IO.binwrite(file, "file " <> Path.join(save_dir_abs, m4a_live_filename) <> "\n")
+        :ok = File.close(file)
         download_live = ffmpeg_arg(dyn_playlist, m4a_live_filename, title)
 
         merge_file =
@@ -181,7 +209,13 @@ defmodule TwitterSpaceDL do
         [download_recorded]
       end
 
-    _download(ffmpeg, pipeline)
+    :ok = _download(ffmpeg, pipeline)
+
+    # cleanup
+    if space_state == "Running" do
+      File.rm!(concat_txt)
+      File.rm!(m4a_live_filename)
+    end
   end
 
   defp _download(_ffmpeg, []), do: :ok
