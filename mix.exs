@@ -7,7 +7,10 @@ defmodule TwspaceDl.MixProject do
       version: "0.1.0",
       elixir: "~> 1.12",
       start_permanent: Mix.env() == :prod,
-      deps: deps()
+      deps: deps(),
+      description: description(),
+      package: package(),
+      source_url: "https://github.com/cocoa-xu/twspace_dl"
     ]
   end
 
@@ -21,7 +24,23 @@ defmodule TwspaceDl.MixProject do
   defp deps do
     [
       {:httpotion, "~> 3.1.0"},
-      {:jason, "~> 1.2"}
+      {:jason, "~> 1.2"},
+      {:ex_doc, "~> 0.14", only: :dev, runtime: false}
+    ]
+  end
+
+  defp description() do
+    "Twitter Space audio downloader"
+  end
+
+  defp elixirc_paths(_), do: ~w(lib)
+
+  defp package() do
+    [
+      name: "twspace_dl",
+      files: ~w(lib .formatter.exs mix.exs README* LICENSE*),
+      licenses: ["Apache-2.0"],
+      links: %{"GitHub" => "https://github.com/cocoa-xu/twspace_dl"}
     ]
   end
 end
