@@ -2,6 +2,25 @@
 
 Download Twitter Space Audio
 
+## Example
+### Download by space url
+```elixir
+space = TwitterSpaceDL.new(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
+TwitterSpaceDL.download(space)
+```
+
+### Download by space id
+```elixir
+space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb")
+TwitterSpaceDL.download(space)
+```
+
+### Download by space id and use custom filename template
+```elixir
+space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb", "space-%{title}-%{rest_id}-%{created_at}")
+TwitterSpaceDL.download(space)
+```
+
 ## Installation
 
 If [available in Hex](https://hex.pm/docs/publish), the package can be installed
@@ -18,4 +37,3 @@ end
 Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at [https://hexdocs.pm/twspace_dl](https://hexdocs.pm/twspace_dl).
-
