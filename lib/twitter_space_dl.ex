@@ -10,26 +10,36 @@ defmodule TwitterSpaceDL do
   @audio_space_metadata_endpoint "https://twitter.com/i/api/graphql/Uv5R_-Chxbn1FEkyUkSW2w/AudioSpaceById"
   @live_video_stream_status_endpoint "https://twitter.com/i/api/1.1/live_video_stream/status/"
 
+  # ets table keys
+  @filename "filename"
+  @filename_template "%{title}"
+  @master_playlist "master_playlist"
+  @dyn_url "dyn_url"
+  @metadata "metadata"
+  @guest_token "guest_token"
+
   def download(self_pid) do
     GenServer.call(self_pid, :download)
   end
 
   @impl true
-  def init(%{from_space_url: url}) do
+  def init(arg = %{from_space_url: url}) do
     ets_table = :ets.new(:buckets_registry, [:set, :protected])
-    {:ok, %{space_id: from_space_url(url), ets_table: ets_table}}
+    template = Map.get(arg, :template, @filename_template)
+    {:ok, %{space_id: from_space_url(url), ets_table: ets_table, template: template}}
   end
 
   @impl true
-  def init(%{from_space_id: space_id}) when is_binary(space_id) do
+  def init(arg = %{from_space_id: space_id}) when is_binary(space_id) do
     ets_table = :ets.new(:buckets_registry, [:set, :protected])
-    {:ok, %{space_id: space_id, ets_table: ets_table}}
+    template = Map.get(arg, :template, @filename_template)
+    {:ok, %{space_id: space_id, ets_table: ets_table, template: template}}
   end
 
   @impl true
   def handle_call(:download, _from, state = %{space_id: space_id, ets_table: ets_table}) do
-    {:ok, master_playlist} = master_url(space_id, ets_table)
-    {:reply, master_playlist, state}
+    playlist = playlist_content(space_id, ets_table)
+    {:reply, playlist, state}
   end
 
   defp from_space_url(url) when is_binary(url) do
@@ -41,27 +51,85 @@ defmodule TwitterSpaceDL do
     end
   end
 
+  defp filename(space_id, ets_table, template) do
+    with [[@filename, filename] | _] <- :ets.lookup(ets_table, @filename)
+    do
+      filename
+    else
+      {:ok, %{data: %{audioSpace: %{metadata: meta}}}} = metadata(space_id, ets_table)
+      filename =
+        ~r/\%\{(\w*)\}/
+        |> Regex.scan(template)
+        |> format_template(template, meta)
+      true = :ets.insert(ets_table, {@filename, filename})
+      filename
+    end
+  end
+
+  defp format_template([], template, _meta), do: template
+  defp format_template([[raw, key] | rest], template, meta) do
+    format_template(rest,
+      raw
+      |> Regex.compile!()
+      |> Regex.replace(template, Map.get(meta, String.to_atom(key), "")))
+  end
+
+  defp playlist_content(space_id, ets_table) do
+    with {:ok, playlist_url} = playlist_url(space_id, ets_table),
+         {:ok, master_url} = master_url(space_id, ets_table),
+         url_base = Regex.replace(~r/master_playlist.m3u8.*/, master_url, ""),
+         %HTTPotion.Response{body: body, status_code: 200} <-
+           HTTPotion.get(playlist_url, follow_redirects: true)
+    do
+      Regex.replace(~r/chunk_/, body, "#{url_base}chunk_")
+    else
+      _ ->
+        msg = "cannot fetch playlist: #{playlist_url}"
+        Logger.error(msg)
+        raise msg
+    end
+  end
+
+  defp playlist_url(space_id, ets_table) do
+    with {:ok, master_playlist} = master_url(space_id, ets_table),
+         %HTTPotion.Response{body: body, status_code: 200} <-
+           HTTPotion.get(master_playlist, follow_redirects: true),
+         [_, _, _, suffix | _] <- String.split(body, "\n"),
+         %URI{host: host} <- URI.parse(master_playlist),
+         playlist <- "https://#{host}#{suffix}",
+         true <- :ets.insert(ets_table, {@playlist_url, playlist})
+    do
+      {:ok, playlist}
+    else
+      _ ->
+        msg = "cannot get the playlist url"
+        Logger.error(msg)
+        :error
+    end
+  end
+
   defp master_url(space_id, ets_table) do
-    with [{"master_playlist", master_playlist} | _] <- :ets.lookup(ets_table, "master_playlist")
+    with [{@master_playlist, master_playlist} | _] <- :ets.lookup(ets_table, @master_playlist)
     do
       {:ok, master_playlist}
     else
       [] ->
         with {:ok, dyn_url} <- dyn_url(space_id, ets_table),
-             master_playlist <- Regex.replace(~r/\/audio-space\/.*/, dyn_url, "/audio-space/master_playlist.m3u8")
-        true <- :ets.insert(ets_table, {"master_playlist", master_playlist})
-          do
+             master_playlist <- Regex.replace(~r/\/audio-space\/.*/, dyn_url, "/audio-space/master_playlist.m3u8"),
+             true <- :ets.insert(ets_table, {@master_playlist, master_playlist})
+        do
           {:ok, master_playlist}
         else
           _ ->
-            Logger.error("cannot get dyn_url")
-            raise "cannot get dyn_url"
+            msg = "cannot get dyn_url"
+            Logger.error(msg)
+            raise msg
         end
     end
   end
 
   defp dyn_url(space_id, ets_table) do
-    with [{"dyn_url", dyn_url} | _] <- :ets.lookup(ets_table, "dyn_url")
+    with [{@dyn_url, dyn_url} | _] <- :ets.lookup(ets_table, @dyn_url)
     do
       {:ok, dyn_url}
     else
@@ -80,7 +148,7 @@ defmodule TwitterSpaceDL do
                     ]),
                   status <- Jason.decode!(body, keys: :atoms),
                   %{source: %{location: dyn_url}} <- status,
-                  true <- :ets.insert(ets_table, {"dyn_url", dyn_url})
+                  true <- :ets.insert(ets_table, {@dyn_url, dyn_url})
                do
                {:ok, dyn_url}
              else
@@ -93,7 +161,7 @@ defmodule TwitterSpaceDL do
   end
 
   defp metadata(space_id, ets_table) when is_binary(space_id) do
-    with [{"metadata", meta} | _] <- :ets.lookup(ets_table, "metadata")
+    with [{@metadata, meta} | _] <- :ets.lookup(ets_table, @metadata)
     do
       {:ok, meta}
     else
@@ -104,7 +172,7 @@ defmodule TwitterSpaceDL do
                HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table)),
              meta <- Jason.decode!(body, keys: :atoms),
              %{data: %{audioSpace: %{metadata: %{media_key: media_key}}}} <- meta,
-             true <- :ets.insert(ets_table, {"metadata", meta})
+             true <- :ets.insert(ets_table, {@metadata, meta})
         do
           {:ok, meta}
         else
@@ -135,7 +203,7 @@ defmodule TwitterSpaceDL do
 
   defp guest_token(ets_table, retry_times \\ 5)
   defp guest_token(ets_table, retry_times) when retry_times >= 0 do
-    with [{"guest_token", guest_token}|_] <- :ets.lookup(ets_table, "guest_token")
+    with [{@guest_token, guest_token}|_] <- :ets.lookup(ets_table, @guest_token)
     do
       Logger.info("cached guest_token: #{guest_token}")
       {:ok, guest_token}
@@ -144,7 +212,7 @@ defmodule TwitterSpaceDL do
         with %HTTPotion.Response{body: body, status_code: 200} <-
                HTTPotion.get("https://twitter.com/", follow_redirects: true, headers: ["User-Agent": @user_agent]),
              [_, guest_token_str | _] <- Regex.run(~r/gt=(\d{19})/, body),
-             true <- :ets.insert(ets_table, {"guest_token", guest_token_str})
+             true <- :ets.insert(ets_table, {@guest_token, guest_token_str})
           do
           Logger.info("guest_token: #{guest_token_str}")
           {:ok, guest_token_str}
