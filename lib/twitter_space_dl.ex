@@ -18,6 +18,32 @@ defmodule TwitterSpaceDL do
   @metadata "metadata"
   @guest_token "guest_token"
 
+  @doc """
+  New Twitter Space downloader
+
+  - **source**: specify the space source
+    - `:space_url`: e.g., `"https://twitter.com/i/spaces/1OyJADqBEgDGb"`
+    - `:space_id`: e.g.,  `"1OyJADqBEgDGb"`
+  - **template**: filename template
+
+    Default value: `"%(title)"`
+
+  **Return**: `pid`
+  """
+  def new(source, id, template \\ @filename_template)
+  def new(:space_id, id, template) do
+    {:ok, pid} = GenServer.start(__MODULE__, %{from_space_id: id, template: template})
+    pid
+  end
+
+  def new(:space_url, url, template) do
+    {:ok, pid} = GenServer.start(__MODULE__, %{from_space_url: url, template: template})
+    pid
+  end
+
+  @doc """
+  Download Twitter Space audio recording
+  """
   def download(self_pid) do
     if nil == System.find_executable("ffmpeg") do
       raise "cannot find ffmpeg"
@@ -54,7 +80,10 @@ defmodule TwitterSpaceDL do
     do
       space_id
     else
-      _ -> nil
+      _ ->
+        msg = "cannot find space id from given url: #{url}"
+        Logger.error(msg)
+        raise msg
     end
   end
 
@@ -109,7 +138,7 @@ defmodule TwitterSpaceDL do
 
     receive do
       {^port, {:exit_status, 0}} -> nil
-      {^port, {:exit_status, status}} -> Logger.warn("ffmpeg exit with status: #{exit_status}")
+      {^port, {:exit_status, status}} -> Logger.warn("ffmpeg exit with status: #{status}")
       {^port, {:data, stdout}} -> IO.puts(Regex.replace(~r/\n/, stdout, "\r\n"))
     end
     _download(ffmpeg, rest)
