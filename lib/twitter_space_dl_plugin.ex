@@ -5,10 +5,16 @@ defmodule TwitterSpaceDL.Plugin do
     end
   end
 
-  @callback get_authorization(String.t()) :: {:ok, String.t()} | {:stop, String.t()} | :stop
-  @callback guest_token({:ok, String.t()} | {:error, String.t()}) ::
+  @callback get_authorization(String.t(), String.t() | nil, String.t() | nil) ::
               {:ok, String.t()} | {:stop, String.t()} | :stop
-  @callback get_guest_header(term) :: {:ok, term} | {:stop, String.t()} | :stop
+  @callback guest_token(
+              {:ok, String.t()} | {:error, String.t()},
+              String.t() | nil,
+              String.t() | nil
+            ) ::
+              {:ok, String.t()} | {:stop, String.t()} | :stop
+  @callback get_guest_header(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
 
   # callback sequence if init by username
   # - get_authorization.
@@ -17,9 +23,12 @@ defmodule TwitterSpaceDL.Plugin do
   # - userinfo.
   # - recent_tweets.
   # - space_urls. You can manually reject/add some urls. The output will be handled individually.
-  @callback userinfo(term) :: {:ok, term} | {:stop, String.t()} | :stop
-  @callback recent_tweets(term) :: {:ok, term} | {:stop, String.t()} | :stop
-  @callback space_urls(term) :: {:ok, term} | {:stop, String.t()} | :stop
+  @callback userinfo(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
+  @callback recent_tweets(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
+  @callback space_urls(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
 
   # callback sequence if init by single space url/id
   # - get_authorization.
@@ -30,21 +39,26 @@ defmodule TwitterSpaceDL.Plugin do
   # - master_url.
   # - playlist_url.
   # - playlist_content.
-  @callback metadata(term) :: {:ok, term} | {:stop, String.t()} | :stop
-  @callback dyn_url(term) :: {:ok, term} | {:stop, String.t()} | :stop
-  @callback master_url(term) :: {:ok, term} | {:stop, String.t()} | :stop
-  @callback playlist_url(term) :: {:ok, term} | {:stop, String.t()} | :stop
-  @callback playlist_content(term) :: {:ok, term} | {:stop, String.t()} | :stop
+  @callback metadata(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
+  @callback dyn_url(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
+  @callback master_url(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
+  @callback playlist_url(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
+  @callback playlist_content(term, String.t() | nil, String.t() | nil) ::
+              {:ok, term} | {:stop, String.t()} | :stop
 
-  @optional_callbacks get_authorization: 1,
-                      guest_token: 1,
-                      get_guest_header: 1,
-                      userinfo: 1,
-                      recent_tweets: 1,
-                      space_urls: 1,
-                      metadata: 1,
-                      dyn_url: 1,
-                      master_url: 1,
-                      playlist_url: 1,
-                      playlist_content: 1
+  @optional_callbacks get_authorization: 3,
+                      guest_token: 3,
+                      get_guest_header: 3,
+                      userinfo: 3,
+                      recent_tweets: 3,
+                      space_urls: 3,
+                      metadata: 3,
+                      dyn_url: 3,
+                      master_url: 3,
+                      playlist_url: 3,
+                      playlist_content: 3
 end

@@ -181,12 +181,12 @@ defmodule TwitterSpaceDL do
     template = opts[:template]
     save_dir = opts[:save_dir]
     File.mkdir_p!(save_dir)
-    playlist = playlist_content(space_id, ets_table)
-    filename = filename(space_id, ets_table, template)
-    dyn_playlist = dyn_url(space_id, ets_table)
+    playlist = playlist_content(space_id, ets_table, opts)
+    filename = filename(space_id, ets_table, template, opts)
+    dyn_playlist = dyn_url(space_id, ets_table, opts)
 
     {:ok, %{data: %{audioSpace: %{metadata: %{state: space_state, title: title}}}}} =
-      metadata(space_id, ets_table)
+      metadata(space_id, ets_table, opts)
 
     {:reply,
      _download(
@@ -221,7 +221,10 @@ defmodule TwitterSpaceDL do
 
         space_urls ->
           Logger.info("found #{Enum.count(space_urls)} space tweets for user_id: #{user_id}")
-          space_urls = to_plugin_module(opts[:plugin_module], {:space_urls, 0}, space_urls)
+
+          space_urls =
+            to_plugin_module(opts[:plugin_module], {:space_urls, 0}, space_urls, username, nil)
+
           total = Enum.count(space_urls)
 
           results =
@@ -365,12 +368,12 @@ defmodule TwitterSpaceDL do
     _download(ffmpeg, rest, show_ffmpeg_output)
   end
 
-  defp filename(space_id, ets_table, template) do
+  defp filename(space_id, ets_table, template, opts) do
     with [[@filename, filename] | _] <- :ets.lookup(ets_table, @filename) do
       filename
     else
       [] ->
-        {:ok, %{data: %{audioSpace: %{metadata: meta}}}} = metadata(space_id, ets_table)
+        {:ok, %{data: %{audioSpace: %{metadata: meta}}}} = metadata(space_id, ets_table, opts)
 
         filename =
           ~r/\%\{(\w*)\}/
@@ -402,11 +405,11 @@ defmodule TwitterSpaceDL do
     output_filename
   end
 
-  defp playlist_content(space_id, ets_table) do
-    {:ok, playlist_url_str} = playlist_url(space_id, ets_table)
+  defp playlist_content(space_id, ets_table, opts) do
+    {:ok, playlist_url_str} = playlist_url(space_id, ets_table, opts)
 
     ret_val =
-      with {:ok, master_url} = master_url(space_id, ets_table),
+      with {:ok, master_url} = master_url(space_id, ets_table, opts),
            url_base = Regex.replace(~r/master_playlist.m3u8.*/, master_url, ""),
            %HTTPotion.Response{body: body, status_code: 200} <-
              HTTPotion.get(playlist_url_str, follow_redirects: true) do
@@ -418,12 +421,12 @@ defmodule TwitterSpaceDL do
           {:error, reason}
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, space_id)
   end
 
-  defp playlist_url(space_id, ets_table) do
+  defp playlist_url(space_id, ets_table, opts) do
     ret_val =
-      with {:ok, master_playlist} = master_url(space_id, ets_table),
+      with {:ok, master_playlist} = master_url(space_id, ets_table, opts),
            %HTTPotion.Response{body: body, status_code: 200} <-
              HTTPotion.get(master_playlist, follow_redirects: true),
            [_, _, _, suffix | _] <- String.split(body, "\n"),
@@ -437,16 +440,16 @@ defmodule TwitterSpaceDL do
           {:error, reason}
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, space_id)
   end
 
-  defp master_url(space_id, ets_table) do
+  defp master_url(space_id, ets_table, opts) do
     ret_val =
       with [{@master_playlist, master_playlist} | _] <- :ets.lookup(ets_table, @master_playlist) do
         {:ok, master_playlist}
       else
         [] ->
-          with {:ok, dyn_url} <- dyn_url(space_id, ets_table),
+          with {:ok, dyn_url} <- dyn_url(space_id, ets_table, opts),
                master_playlist <-
                  Regex.replace(
                    ~r/\/audio-space\/.*/,
@@ -459,20 +462,20 @@ defmodule TwitterSpaceDL do
             _ ->
               reason = "cannot get dyn_url"
               Logger.error(reason)
-              raise msg
+              {:error, reason}
           end
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, space_id)
   end
 
-  defp dyn_url(space_id, ets_table) do
+  defp dyn_url(space_id, ets_table, opts) do
     ret_val =
       with [{@dyn_url, dyn_url} | _] <- :ets.lookup(ets_table, @dyn_url) do
         {:ok, dyn_url}
       else
         [] ->
-          {:ok, meta} = metadata(space_id, ets_table)
+          {:ok, meta} = metadata(space_id, ets_table, opts)
 
           case meta do
             %{
@@ -501,7 +504,7 @@ defmodule TwitterSpaceDL do
                      HTTPotion.get(status_url,
                        follow_redirects: true,
                        headers: [
-                         authorization: get_authorization(),
+                         authorization: get_authorization(opts),
                          cookie: "auth_token="
                        ]
                      ),
@@ -518,10 +521,10 @@ defmodule TwitterSpaceDL do
           end
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, space_id)
   end
 
-  defp metadata(space_id, ets_table) when is_binary(space_id) do
+  defp metadata(space_id, ets_table, opts) when is_binary(space_id) do
     ret_val =
       with [{@metadata, meta} | _] <- :ets.lookup(ets_table, @metadata) do
         {:ok, meta}
@@ -548,7 +551,7 @@ defmodule TwitterSpaceDL do
           with %HTTPotion.Response{body: body, status_code: 200} <-
                  HTTPotion.get(get_url,
                    follow_redirects: true,
-                   headers: get_guest_header(ets_table)
+                   headers: get_guest_header(ets_table, opts)
                  ),
                meta <- Jason.decode!(body, keys: :atoms),
                %{data: %{audioSpace: %{metadata: %{media_key: _media_key}}}} <- meta,
@@ -562,14 +565,14 @@ defmodule TwitterSpaceDL do
           end
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, space_id)
   end
 
-  defp to_plugin_module(nil, _func, result), do: result
+  defp to_plugin_module(nil, _func, result, _username, _space_id), do: result
 
-  defp to_plugin_module(plugin_module, {func_name, _}, result) do
-    if plugin_module != nil and function_exported?(plugin_module, func_name, 1) do
-      case apply(plugin_module, func_name, [result]) do
+  defp to_plugin_module(plugin_module, {func_name, _}, result, username, space_id) do
+    if plugin_module != nil and function_exported?(plugin_module, func_name, 3) do
+      case apply(plugin_module, func_name, [result, username, space_id]) do
         {:ok, maybe_modified_result} -> maybe_modified_result
         {:stop, reason} -> exit({:by_plugin_module, reason})
         :stop -> exit({:by_plugin_module, nil})
@@ -594,7 +597,7 @@ defmodule TwitterSpaceDL do
 
     ret_val =
       with %HTTPotion.Response{body: body, status_code: 200} <-
-             HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table)),
+             HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table, opts)),
            {:ok, info} <- Jason.decode(body, keys: :atoms) do
         {:ok, info}
       else
@@ -604,7 +607,7 @@ defmodule TwitterSpaceDL do
           {:error, reason}
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, username, nil)
   end
 
   defp recent_tweets(user_id, ets_table, opts) do
@@ -631,7 +634,7 @@ defmodule TwitterSpaceDL do
 
     ret_val =
       with %HTTPotion.Response{body: body, status_code: 200} <-
-             HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table)) do
+             HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table, opts)) do
         {:ok, body}
       else
         _ ->
@@ -640,35 +643,35 @@ defmodule TwitterSpaceDL do
           {:error, reason}
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, nil)
   end
 
-  defp get_authorization do
+  defp get_authorization(opts) do
     auth =
       "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, auth)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, auth, nil, nil)
   end
 
-  defp get_guest_header(ets_table) do
+  defp get_guest_header(ets_table, opts) do
     ret_val =
-      with {:ok, guest_token} <- guest_token(ets_table) do
+      with {:ok, guest_token} <- guest_token(ets_table, opts) do
         [
-          authorization: get_authorization(),
+          authorization: get_authorization(opts),
           "x-guest-token": "#{guest_token}"
         ]
       else
         [] ->
-          true = guest_token(ets_table)
-          get_guest_header(ets_table)
+          true = guest_token(ets_table, opts)
+          get_guest_header(ets_table, opts)
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, nil)
   end
 
-  defp guest_token(ets_table, retry_times \\ 5)
+  defp guest_token(ets_table, opts, retry_times \\ 5)
 
-  defp guest_token(ets_table, retry_times) when retry_times >= 0 do
+  defp guest_token(ets_table, opts, retry_times) when retry_times >= 0 do
     ret_val =
       with [{@guest_token, guest_token} | _] <- :ets.lookup(ets_table, @guest_token) do
         Logger.info("cached guest_token: #{guest_token}")
@@ -688,14 +691,14 @@ defmodule TwitterSpaceDL do
             _ ->
               Logger.warn("guest_token not found, retrying... #{retry_times} times left")
               :timer.sleep(1000)
-              guest_token(ets_table, retry_times - 1)
+              guest_token(ets_table, opts, retry_times - 1)
           end
       end
 
-    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val)
+    to_plugin_module(opts[:plugin_module], __ENV__.function, ret_val, nil, nil)
   end
 
-  defp guest_token(_ets_table, retry_times) when retry_times < 0 do
+  defp guest_token(_ets_table, _opts, retry_times) when retry_times < 0 do
     reason = "no guest_token found"
     Logger.error(reason)
     {:error, reason}
