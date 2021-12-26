@@ -10,9 +10,10 @@ defmodule TwitterSpaceDL do
   @audio_space_metadata_endpoint "https://twitter.com/i/api/graphql/Uv5R_-Chxbn1FEkyUkSW2w/AudioSpaceById"
   @live_video_stream_status_endpoint "https://twitter.com/i/api/1.1/live_video_stream/status/"
 
+  @filename_template "%{title}"
+
   # ets table keys
   @filename "filename"
-  @filename_template "%{title}"
   @master_playlist "master_playlist"
   @dyn_url "dyn_url"
   @metadata "metadata"
@@ -22,13 +23,47 @@ defmodule TwitterSpaceDL do
   New Twitter Space downloader
 
   - **source**: specify the space source
-    - `:space_url`: e.g., `"https://twitter.com/i/spaces/1OyJADqBEgDGb"`
-    - `:space_id`: e.g.,  `"1OyJADqBEgDGb"`
+    - `:space_url`.
+
+      For example, `"https://twitter.com/i/spaces/1OyJADqBEgDGb"`
+
+    - `:space_id`.
+
+      For example, `"1OyJADqBEgDGb"`
+
   - **template**: filename template
 
-    Default value: `"%(title)"`
+    Default value: `"%{title}"`. Valid keys are:
+
+    - `title`.
+    - `created_at`.
+    - `ended_at`.
+    - `rest_id`.
+    - `started_at`.
+    - `total_participated`.
+    - `total_replay_watched`.
+    - `updated_at`.
 
   **Return**: `pid`
+
+  ## Example
+  ### Download by space url
+  ```elixir
+  space = TwitterSpaceDL.new(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
+  TwitterSpaceDL.download(space)
+  ```
+
+  ### Download by space id
+  ```elixir
+  space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb")
+  TwitterSpaceDL.download(space)
+  ```
+
+  ### Download by space id and use custom filename template
+  ```elixir
+  space = TwitterSpaceDL.new(:space_id, "1OyJADqBEgDGb", "space-%{title}-%{rest_id}-%{created_at}")
+  TwitterSpaceDL.download(space)
+  ```
   """
   def new(source, id, template \\ @filename_template)
 
@@ -320,6 +355,7 @@ defmodule TwitterSpaceDL do
              meta <- Jason.decode!(body, keys: :atoms),
              %{data: %{audioSpace: %{metadata: %{media_key: _media_key}}}} <- meta,
              true <- :ets.insert(ets_table, {@metadata, meta}) do
+          IO.inspect(meta)
           {:ok, meta}
         else
           _ ->
