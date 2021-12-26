@@ -2,6 +2,9 @@
 
 Download Twitter Space Audio
 
+## Dependency
+- FFmpeg
+
 ## Example
 Download by space url
 ```elixir
