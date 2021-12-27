@@ -150,6 +150,14 @@ defmodule TwitterSpaceDL do
     GenServer.call(self_pid, :download, :infinity)
   end
 
+  @doc """
+  Download Twitter Space audio recording asynchronously
+  """
+  def async_download(self_pid) do
+    ensure_ffmpeg()
+    GenServer.cast(self_pid, :download)
+  end
+
   @impl true
   def init(arg = %{from_space_url: url}) do
     ets_table = :ets.new(:buckets_registry, [:set, :protected])
@@ -172,15 +180,44 @@ defmodule TwitterSpaceDL do
   end
 
   @impl true
-  def handle_call(
-        :download,
-        _from,
-        state = %{
-          space_id: space_id,
-          ets_table: ets_table,
-          opts: opts
-        }
-      ) do
+  def handle_call(:download, _from, state = %{space_id: _space_id}) do
+    {:reply, download_by_id(state), state}
+  end
+
+  @impl true
+  def handle_call(:download, _from, state = %{username: _username}) do
+    {:reply, download_by_user(state), state}
+  end
+
+  defp from_space_url(url) when is_binary(url) do
+    with [_, space_id | _] <- Regex.run(~r/spaces\/(\w+)/, url) do
+      space_id
+    else
+      _ ->
+        msg = "cannot find space id from given url: #{url}"
+        Logger.error(msg)
+        raise msg
+    end
+  end
+
+  defp ffmpeg_arg(input, output, title) do
+    [
+      "-hide_banner",
+      "-y",
+      "-stats",
+      "-v",
+      "warning",
+      "-i",
+      input,
+      "-c",
+      "copy",
+      "-metadata",
+      "title=#{title}",
+      output
+    ]
+  end
+
+  defp download_by_id(%{space_id: space_id, ets_table: ets_table, opts: opts}) do
     template = opts[:template]
     save_dir = opts[:save_dir]
     File.mkdir_p!(save_dir)
@@ -191,36 +228,26 @@ defmodule TwitterSpaceDL do
     {:ok, %{data: %{audioSpace: %{metadata: %{state: space_state, title: title}}}}} =
       metadata(space_id, ets_table, opts)
 
-    {:reply,
-     _download(
-       System.find_executable("ffmpeg"),
-       filename,
-       playlist,
-       dyn_playlist,
-       title,
-       space_state,
-       save_dir,
-       opts
-     ), state}
+    _download(
+      System.find_executable("ffmpeg"),
+      filename,
+      playlist,
+      dyn_playlist,
+      title,
+      space_state,
+      save_dir,
+      opts
+    )
   end
 
-  @impl true
-  def handle_call(
-        :download,
-        _from,
-        state = %{
-          username: username,
-          ets_table: ets_table,
-          opts: opts
-        }
-      ) do
+  defp download_by_user(%{username: username, ets_table: ets_table, opts: opts}) do
     with {:ok, %{data: %{user: %{result: %{rest_id: user_id}}}}} <-
            userinfo(username, ets_table, opts),
          {:ok, tweets} <- recent_tweets(user_id, ets_table, opts) do
       case Regex.scan(~r/https:\/\/twitter.com\/i\/spaces\/\w*/, tweets) do
         [] ->
           Logger.info("no space tweets found for user_id: #{user_id}")
-          {:reply, [], state}
+          {:ok, []}
 
         space_urls ->
           Logger.info("found #{Enum.count(space_urls)} space tweets for user_id: #{user_id}")
@@ -258,42 +285,14 @@ defmodule TwitterSpaceDL do
               end
             end)
 
-          {:reply, results, state}
+          {:ok, results}
       end
     else
       _ ->
-        msg = "cannot find rest_id"
-        Logger.error(msg)
-        {:stop, msg, state}
+        reason = "cannot find rest_id for user: #{username}"
+        Logger.error(reason)
+        {:error, reason}
     end
-  end
-
-  defp from_space_url(url) when is_binary(url) do
-    with [_, space_id | _] <- Regex.run(~r/spaces\/(\w+)/, url) do
-      space_id
-    else
-      _ ->
-        msg = "cannot find space id from given url: #{url}"
-        Logger.error(msg)
-        raise msg
-    end
-  end
-
-  defp ffmpeg_arg(input, output, title) do
-    [
-      "-hide_banner",
-      "-y",
-      "-stats",
-      "-v",
-      "warning",
-      "-i",
-      input,
-      "-c",
-      "copy",
-      "-metadata",
-      "title=#{title}",
-      output
-    ]
   end
 
   defp _download(
@@ -600,7 +599,10 @@ defmodule TwitterSpaceDL do
 
     ret_val =
       with %HTTPotion.Response{body: body, status_code: 200} <-
-             HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table, opts)),
+             HTTPotion.get(get_url,
+               follow_redirects: true,
+               headers: get_guest_header(ets_table, opts)
+             ),
            {:ok, info} <- Jason.decode(body, keys: :atoms) do
         {:ok, info}
       else
@@ -637,7 +639,10 @@ defmodule TwitterSpaceDL do
 
     ret_val =
       with %HTTPotion.Response{body: body, status_code: 200} <-
-             HTTPotion.get(get_url, follow_redirects: true, headers: get_guest_header(ets_table, opts)) do
+             HTTPotion.get(get_url,
+               follow_redirects: true,
+               headers: get_guest_header(ets_table, opts)
+             ) do
         {:ok, body}
       else
         _ ->
