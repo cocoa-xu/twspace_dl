@@ -136,14 +136,17 @@ defmodule TwitterSpaceDL do
     end)
   end
 
+  defp ensure_ffmpeg do
+    if nil == System.find_executable("ffmpeg") do
+      raise "cannot find ffmpeg"
+    end
+  end
+
   @doc """
   Download Twitter Space audio recording
   """
   def download(self_pid) do
-    if nil == System.find_executable("ffmpeg") do
-      raise "cannot find ffmpeg"
-    end
-
+    ensure_ffmpeg()
     GenServer.call(self_pid, :download, :infinity)
   end
 
