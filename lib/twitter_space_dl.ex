@@ -63,13 +63,19 @@ defmodule TwitterSpaceDL do
   Download by space url
   ```elixir
   space = TwitterSpaceDL.new!(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
+  # download synchronously
   TwitterSpaceDL.download(space)
+  # download asynchronously
+  TwitterSpaceDL.async_download(space)
   ```
 
   Download by space id and display ffmpeg output
   ```elixir
   space = TwitterSpaceDL.new!(:space_id, "1OyJADqBEgDGb", show_ffmpeg_output: true)
+  # download synchronously
   TwitterSpaceDL.download(space)
+  # download asynchronously
+  TwitterSpaceDL.async_download(space)
   ```
 
   Download by space id, use custom filename template and save to `download` directory
@@ -77,7 +83,10 @@ defmodule TwitterSpaceDL do
   space = TwitterSpaceDL.new!(:space_id, "1OyJADqBEgDGb",
     template: "space-%{title}-%{rest_id}-%{created_at}",
     save_dir: "./download")
+  # download synchronously
   TwitterSpaceDL.download(space)
+  # download asynchronously
+  TwitterSpaceDL.async_download(space)
   ```
 
   Init by username, use custom filename template and use plugin module
@@ -85,8 +94,12 @@ defmodule TwitterSpaceDL do
   space = TwitterSpaceDL.new!(:user, "LaplusDarknesss",
     template: "space-%{title}-%{rest_id}",
     plugin_module: TwitterSpaceDL.Plugin.CLI)
+
   # you can call this again to download new spaces (if space archive is available)
+  # download synchronously
   TwitterSpaceDL.download(space)
+  # download asynchronously
+  TwitterSpaceDL.async_download(space)
   ```
   """
   def new!(source, source_arg, opts \\ default_opts()) do
@@ -153,40 +166,68 @@ defmodule TwitterSpaceDL do
   @doc """
   Download Twitter Space audio recording asynchronously
   """
-  def async_download(self_pid) do
+  def async_download(self_pid, callback_pid) do
     ensure_ffmpeg()
-    GenServer.cast(self_pid, :download)
+    GenServer.cast(self_pid, {:download, callback_pid})
   end
 
   @impl true
-  def init(arg = %{from_space_url: url}) do
-    ets_table = :ets.new(:buckets_registry, [:set, :protected])
+  def init(arg = %{from_space_url: url}) when is_binary(url) do
     opts = Map.get(arg, :opts, default_opts())
-    {:ok, %{space_id: from_space_url(url), ets_table: ets_table, opts: opts}}
+    {:ok, %{space_id: from_space_url(url), opts: opts}}
   end
 
   @impl true
   def init(arg = %{from_space_id: space_id}) when is_binary(space_id) do
-    ets_table = :ets.new(:buckets_registry, [:set, :protected])
     opts = Map.get(arg, :opts, default_opts())
-    {:ok, %{space_id: space_id, ets_table: ets_table, opts: opts}}
+    {:ok, %{space_id: space_id, opts: opts}}
   end
 
   @impl true
   def init(arg = %{from_username: username}) when is_binary(username) do
-    ets_table = :ets.new(:buckets_registry, [:set, :protected])
     opts = Map.get(arg, :opts, default_opts())
-    {:ok, %{username: username, ets_table: ets_table, opts: opts}}
+    {:ok, %{username: username, opts: opts}}
   end
 
   @impl true
   def handle_call(:download, _from, state = %{space_id: _space_id}) do
-    {:reply, download_by_id(state), state}
+    {download_results, ets_table} = download_by_id(state)
+    state = Map.put(state, :ets_table, ets_table)
+    {:reply, download_results, state}
   end
 
   @impl true
   def handle_call(:download, _from, state = %{username: _username}) do
-    {:reply, download_by_user(state), state}
+    case download_by_user(state)
+    do
+      {:ok, download_results, ets_table} ->
+        state = Map.put(state, :ets_table, ets_table)
+        {:reply, download_results, state}
+      other ->
+        {:reply, other, state}
+    end
+  end
+
+  @impl true
+  def handle_cast({:download, callback_pid}, state = %{space_id: space_id}) do
+    self_pid = self()
+    child = spawn(fn ->
+      send(callback_pid, {self_pid, %{space_id: space_id}, download_by_id(state)})
+    end)
+    send(callback_pid, {self_pid, child})
+
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_cast({:download, callback_pid}, state = %{username: username}) do
+    self_pid = self()
+    child = spawn(fn ->
+      send(callback_pid, {self_pid, %{username: username}, download_by_user(state)})
+    end)
+    send(callback_pid, {self_pid, child})
+
+    {:noreply, state}
   end
 
   defp from_space_url(url) when is_binary(url) do
@@ -217,7 +258,12 @@ defmodule TwitterSpaceDL do
     ]
   end
 
-  defp download_by_id(%{space_id: space_id, ets_table: ets_table, opts: opts}) do
+  defp download_by_id(state = %{space_id: space_id, opts: opts}) do
+    ets_table = case Map.get(state, :ets_table)
+    do
+        nil -> :ets.new(:twspace_dl, [:set, :protected])
+        tab -> tab
+    end
     template = opts[:template]
     save_dir = opts[:save_dir]
     File.mkdir_p!(save_dir)
@@ -228,7 +274,7 @@ defmodule TwitterSpaceDL do
     {:ok, %{data: %{audioSpace: %{metadata: %{state: space_state, title: title}}}}} =
       metadata(space_id, ets_table, opts)
 
-    _download(
+    download_results = _download(
       System.find_executable("ffmpeg"),
       filename,
       playlist,
@@ -238,16 +284,23 @@ defmodule TwitterSpaceDL do
       save_dir,
       opts
     )
+
+    {download_results, ets_table}
   end
 
-  defp download_by_user(%{username: username, ets_table: ets_table, opts: opts}) do
+  defp download_by_user(state = %{username: username, opts: opts}) do
+    ets_table = case Map.get(state, :ets_table)
+    do
+      nil -> :ets.new(:twspace_dl, [:set, :protected])
+      tab -> tab
+    end
     with {:ok, %{data: %{user: %{result: %{rest_id: user_id}}}}} <-
            userinfo(username, ets_table, opts),
          {:ok, tweets} <- recent_tweets(user_id, ets_table, opts) do
       case Regex.scan(~r/https:\/\/twitter.com\/i\/spaces\/\w*/, tweets) do
         [] ->
           Logger.info("no space tweets found for user_id: #{user_id}")
-          {:ok, []}
+          {:ok, [], ets_table}
 
         space_urls ->
           Logger.info("found #{Enum.count(space_urls)} space tweets for user_id: #{user_id}")
@@ -285,10 +338,11 @@ defmodule TwitterSpaceDL do
               end
             end)
 
-          {:ok, results}
+          {:ok, results, ets_table}
       end
     else
       _ ->
+        :ets.delete(ets_table)
         reason = "cannot find rest_id for user: #{username}"
         Logger.error(reason)
         {:error, reason}

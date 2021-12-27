@@ -9,13 +9,19 @@ Download Twitter Space Audio
 Download by space url
 ```elixir
 space = TwitterSpaceDL.new!(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
+# download synchronously
 TwitterSpaceDL.download(space)
+# download asynchronously
+TwitterSpaceDL.async_download(space)
 ```
 
 Download by space id and display ffmpeg output
 ```elixir
 space = TwitterSpaceDL.new!(:space_id, "1OyJADqBEgDGb", show_ffmpeg_output: true)
+# download synchronously
 TwitterSpaceDL.download(space)
+# download asynchronously
+TwitterSpaceDL.async_download(space)
 ```
 
 Download by space id, use custom filename template and save to `download` directory
@@ -23,7 +29,10 @@ Download by space id, use custom filename template and save to `download` direct
 space = TwitterSpaceDL.new!(:space_id, "1OyJADqBEgDGb",
   template: "space-%{title}-%{rest_id}-%{created_at}",
   save_dir: "./download")
+# download synchronously
 TwitterSpaceDL.download(space)
+# download asynchronously
+TwitterSpaceDL.async_download(space)
 ```
 
 Init by username, use custom filename template and use plugin module
@@ -31,8 +40,12 @@ Init by username, use custom filename template and use plugin module
 space = TwitterSpaceDL.new!(:user, "LaplusDarknesss",
   template: "space-%{title}-%{rest_id}",
   plugin_module: TwitterSpaceDL.Plugin.CLI)
+
 # you can call this again to download new spaces (if space archive is available)
+# download synchronously
 TwitterSpaceDL.download(space)
+# download asynchronously
+TwitterSpaceDL.async_download(space)
 ```
 
 ### Optional arguments
