@@ -65,8 +65,13 @@ defmodule TwitterSpaceDL do
   space = TwitterSpaceDL.new!(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
   # download synchronously
   TwitterSpaceDL.download(space)
+
   # download asynchronously
-  TwitterSpaceDL.async_download(space)
+  TwitterSpaceDL.async_download(space, self())
+  # iex > flush
+  # {#PID<0.368.0>, %{download_pid: #PID<0.370.0>, space_id: "1OyJADqBEgDGb"}}
+  # {#PID<0.368.0>, %{space_id: "1OyJADqBEgDGb"}, :ok}
+  # :ok
   ```
 
   Download by space id and display ffmpeg output
@@ -74,8 +79,13 @@ defmodule TwitterSpaceDL do
   space = TwitterSpaceDL.new!(:space_id, "1OyJADqBEgDGb", show_ffmpeg_output: true)
   # download synchronously
   TwitterSpaceDL.download(space)
+
   # download asynchronously
-  TwitterSpaceDL.async_download(space)
+  TwitterSpaceDL.async_download(space, self())
+  # iex > flush
+  # {#PID<0.368.0>, %{download_pid: #PID<0.370.0>, space_id: "1OyJADqBEgDGb"}}
+  # {#PID<0.368.0>, %{space_id: "1OyJADqBEgDGb"}, :ok}
+  # :ok
   ```
 
   Download by space id, use custom filename template and save to `download` directory
@@ -85,8 +95,13 @@ defmodule TwitterSpaceDL do
     save_dir: "./download")
   # download synchronously
   TwitterSpaceDL.download(space)
+
   # download asynchronously
-  TwitterSpaceDL.async_download(space)
+  TwitterSpaceDL.async_download(space, self())
+  # iex > flush
+  # {#PID<0.368.0>, %{download_pid: #PID<0.370.0>, space_id: "1OyJADqBEgDGb"}}
+  # {#PID<0.368.0>, %{space_id: "1OyJADqBEgDGb"}, :ok}
+  # :ok
   ```
 
   Init by username, use custom filename template and use plugin module
@@ -98,8 +113,13 @@ defmodule TwitterSpaceDL do
   # you can call this again to download new spaces (if space archive is available)
   # download synchronously
   TwitterSpaceDL.download(space)
+
   # download asynchronously
-  TwitterSpaceDL.async_download(space)
+  TwitterSpaceDL.async_download(space, self())
+  # iex > flush
+  # {#PID<0.400.0>, %{download_pid: #PID<0.402.0>, username: "LaplusDarknesss"}}
+  # {#PID<0.400.0>, %{username: "LaplusDarknesss"}, [{"https://twitter.com/i/spaces/1mnGedeXloNKX", :ok}]}
+  # :ok
   ```
   """
   def new!(source, source_arg, opts \\ default_opts()) do
@@ -174,7 +194,10 @@ defmodule TwitterSpaceDL do
   @impl true
   def init(arg = %{from_space_url: url}) when is_binary(url) do
     opts = Map.get(arg, :opts, default_opts())
-    {:ok, %{space_id: from_space_url(url), opts: opts}}
+    case from_space_url(url) do
+      {:ok, space_id} -> {:ok, %{space_id: space_id, opts: opts}}
+      {:error, reason} -> {:stop, reason}
+    end
   end
 
   @impl true
@@ -191,30 +214,47 @@ defmodule TwitterSpaceDL do
 
   @impl true
   def handle_call(:download, _from, state = %{space_id: _space_id}) do
-    {download_results, ets_table} = download_by_id(state)
-    state = Map.put(state, :ets_table, ets_table)
-    {:reply, download_results, state}
+    case download_by_id(state) do
+      {:ok, download_results, ets_table} ->
+        state = Map.put(state, :ets_table, ets_table)
+        {:reply, download_results, state}
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+      other ->
+        {:reply, {:error, other}, state}
+    end
   end
 
   @impl true
   def handle_call(:download, _from, state = %{username: _username}) do
-    case download_by_user(state)
-    do
+    case download_by_user(state) do
       {:ok, download_results, ets_table} ->
         state = Map.put(state, :ets_table, ets_table)
         {:reply, download_results, state}
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
       other ->
-        {:reply, other, state}
+        {:reply, {:error, other}, state}
     end
   end
 
   @impl true
   def handle_cast({:download, callback_pid}, state = %{space_id: space_id}) do
     self_pid = self()
-    child = spawn(fn ->
-      send(callback_pid, {self_pid, %{space_id: space_id}, download_by_id(state)})
-    end)
-    send(callback_pid, {self_pid, child})
+
+    child =
+      spawn(fn ->
+        case download_by_id(state) do
+          {:ok, download_results, ets_table} ->
+            :ets.delete(ets_table)
+            send(callback_pid, {self_pid, %{space_id: space_id}, download_results})
+          {:error, reason} ->
+            send(callback_pid, {self_pid, %{space_id: space_id}, {:error, reason}})
+          other ->
+            send(callback_pid, {self_pid, %{space_id: space_id}, {:error, other}})
+        end
+      end)
+    send(callback_pid, {self_pid, %{space_id: space_id, download_pid: child}})
 
     {:noreply, state}
   end
@@ -222,22 +262,33 @@ defmodule TwitterSpaceDL do
   @impl true
   def handle_cast({:download, callback_pid}, state = %{username: username}) do
     self_pid = self()
-    child = spawn(fn ->
-      send(callback_pid, {self_pid, %{username: username}, download_by_user(state)})
-    end)
-    send(callback_pid, {self_pid, child})
+
+    child =
+      spawn(fn ->
+        case download_by_user(state) do
+          {:ok, download_results, ets_table} ->
+            :ets.delete(ets_table)
+            send(callback_pid, {self_pid, %{username: username}, download_results})
+          {:error, reason} ->
+            send(callback_pid, {self_pid, %{username: username}, %{error: reason}})
+          other ->
+            send(callback_pid, {self_pid, %{username: username}, %{error: other}})
+        end
+      end)
+
+    send(callback_pid, {self_pid, %{username: username, download_pid: child}})
 
     {:noreply, state}
   end
 
   defp from_space_url(url) when is_binary(url) do
     with [_, space_id | _] <- Regex.run(~r/spaces\/(\w+)/, url) do
-      space_id
+      {:ok, space_id}
     else
       _ ->
-        msg = "cannot find space id from given url: #{url}"
-        Logger.error(msg)
-        raise msg
+        reason = "cannot find space id from given url: #{url}"
+        Logger.error(reason)
+        {:error, reason}
     end
   end
 
@@ -259,41 +310,47 @@ defmodule TwitterSpaceDL do
   end
 
   defp download_by_id(state = %{space_id: space_id, opts: opts}) do
-    ets_table = case Map.get(state, :ets_table)
-    do
+    ets_table =
+      case Map.get(state, :ets_table) do
         nil -> :ets.new(:twspace_dl, [:set, :protected])
         tab -> tab
-    end
+      end
+
     template = opts[:template]
     save_dir = opts[:save_dir]
     File.mkdir_p!(save_dir)
-    playlist = playlist_content(space_id, ets_table, opts)
-    filename = filename(space_id, ets_table, template, opts)
-    dyn_playlist = dyn_url(space_id, ets_table, opts)
 
-    {:ok, %{data: %{audioSpace: %{metadata: %{state: space_state, title: title}}}}} =
-      metadata(space_id, ets_table, opts)
+    with {:ok, playlist} <- playlist_content(space_id, ets_table, opts),
+         {:ok, filename} <- filename(space_id, ets_table, template, opts),
+         {:ok, dyn_playlist} <- dyn_url(space_id, ets_table, opts),
+         {:ok, %{data: %{audioSpace: %{metadata: %{state: space_state, title: title}}}}} <-
+           metadata(space_id, ets_table, opts) do
+      download_results =
+        _download(
+          System.find_executable("ffmpeg"),
+          filename,
+          playlist,
+          dyn_playlist,
+          title,
+          space_state,
+          save_dir,
+          opts
+        )
 
-    download_results = _download(
-      System.find_executable("ffmpeg"),
-      filename,
-      playlist,
-      dyn_playlist,
-      title,
-      space_state,
-      save_dir,
-      opts
-    )
-
-    {download_results, ets_table}
+      {:ok, download_results, ets_table}
+    else
+      {:error, reason} -> {:error, reason}
+      other -> other
+    end
   end
 
   defp download_by_user(state = %{username: username, opts: opts}) do
-    ets_table = case Map.get(state, :ets_table)
-    do
-      nil -> :ets.new(:twspace_dl, [:set, :protected])
-      tab -> tab
-    end
+    ets_table =
+      case Map.get(state, :ets_table) do
+        nil -> :ets.new(:twspace_dl, [:set, :protected])
+        tab -> tab
+      end
+
     with {:ok, %{data: %{user: %{result: %{rest_id: user_id}}}}} <-
            userinfo(username, ets_table, opts),
          {:ok, tweets} <- recent_tweets(user_id, ets_table, opts) do
@@ -425,19 +482,23 @@ defmodule TwitterSpaceDL do
   end
 
   defp filename(space_id, ets_table, template, opts) do
-    with [[@filename, filename] | _] <- :ets.lookup(ets_table, @filename) do
+    with [{@filename, filename} | _] <- :ets.lookup(ets_table, @filename) do
       filename
     else
       [] ->
-        {:ok, %{data: %{audioSpace: %{metadata: meta}}}} = metadata(space_id, ets_table, opts)
+        case metadata(space_id, ets_table, opts) do
+          {:error, reason} ->
+            {:error, reason}
 
-        filename =
-          ~r/\%\{(\w*)\}/
-          |> Regex.scan(template)
-          |> format_template(template, meta)
+          {:ok, %{data: %{audioSpace: %{metadata: meta}}}} ->
+            filename =
+              ~r/\%\{(\w*)\}/
+              |> Regex.scan(template)
+              |> format_template(template, meta)
 
-        true = :ets.insert(ets_table, {@filename, filename})
-        filename
+            true = :ets.insert(ets_table, {@filename, filename})
+            {:ok, filename}
+        end
     end
   end
 
@@ -462,17 +523,19 @@ defmodule TwitterSpaceDL do
   end
 
   defp playlist_content(space_id, ets_table, opts) do
-    {:ok, playlist_url_str} = playlist_url(space_id, ets_table, opts)
-
     ret_val =
-      with {:ok, master_url} = master_url(space_id, ets_table, opts),
+      with {:ok, playlist_url_str} = playlist_url(space_id, ets_table, opts),
+           {:ok, master_url} = master_url(space_id, ets_table, opts),
            url_base = Regex.replace(~r/master_playlist.m3u8.*/, master_url, ""),
            %HTTPotion.Response{body: body, status_code: 200} <-
              HTTPotion.get(playlist_url_str, follow_redirects: true) do
-        Regex.replace(~r/chunk_/, body, "#{url_base}chunk_")
+        {:ok, Regex.replace(~r/chunk_/, body, "#{url_base}chunk_")}
       else
+        {:error, reason} ->
+          {:error, reason}
+
         _ ->
-          reason = "cannot fetch playlist: #{playlist_url_str} for space_id: #{space_id}"
+          reason = "cannot fetch playlist for space_id: #{space_id}"
           Logger.error(reason)
           {:error, reason}
       end
@@ -490,6 +553,9 @@ defmodule TwitterSpaceDL do
            playlist <- "https://#{host}#{suffix}" do
         {:ok, playlist}
       else
+        {:error, reason} ->
+          {:error, reason}
+
         _ ->
           reason = "cannot get the playlist url"
           Logger.error(reason)
@@ -515,6 +581,9 @@ defmodule TwitterSpaceDL do
                true <- :ets.insert(ets_table, {@master_playlist, master_playlist}) do
             {:ok, master_playlist}
           else
+            {:error, reason} ->
+              {:error, reason}
+
             _ ->
               reason = "cannot get dyn_url"
               Logger.error(reason)
@@ -531,29 +600,32 @@ defmodule TwitterSpaceDL do
         {:ok, dyn_url}
       else
         [] ->
-          {:ok, meta} = metadata(space_id, ets_table, opts)
+          case metadata(space_id, ets_table, opts) do
+            {:error, reason} ->
+              {:error, reason}
 
-          case meta do
-            %{
-              data: %{
-                audioSpace: %{metadata: %{state: "Ended", is_space_available_for_replay: false}}
-              }
-            } ->
+            {:ok,
+             %{
+               data: %{
+                 audioSpace: %{metadata: %{state: "Ended", is_space_available_for_replay: false}}
+               }
+             }} ->
               reason = "Space has ended but it is not available for replay"
               Logger.error(reason)
               {:error, reason}
 
-            %{
-              data: %{
-                audioSpace: %{
-                  metadata: %{
-                    state: "Ended",
-                    is_space_available_for_replay: true,
-                    media_key: media_key
-                  }
-                }
-              }
-            } ->
+            {:ok,
+             %{
+               data: %{
+                 audioSpace: %{
+                   metadata: %{
+                     state: "Ended",
+                     is_space_available_for_replay: true,
+                     media_key: media_key
+                   }
+                 }
+               }
+             }} ->
               status_url = @live_video_stream_status_endpoint <> media_key
 
               with %HTTPotion.Response{body: body, status_code: 200} <-

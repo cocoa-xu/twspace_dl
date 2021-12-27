@@ -11,8 +11,13 @@ Download by space url
 space = TwitterSpaceDL.new!(:space_url, "https://twitter.com/i/spaces/1OyJADqBEgDGb")
 # download synchronously
 TwitterSpaceDL.download(space)
+
 # download asynchronously
-TwitterSpaceDL.async_download(space)
+TwitterSpaceDL.async_download(space, self())
+# iex > flush
+# {#PID<0.368.0>, %{download_pid: #PID<0.370.0>, space_id: "1OyJADqBEgDGb"}}
+# {#PID<0.368.0>, %{space_id: "1OyJADqBEgDGb"}, :ok}
+# :ok
 ```
 
 Download by space id and display ffmpeg output
@@ -20,8 +25,13 @@ Download by space id and display ffmpeg output
 space = TwitterSpaceDL.new!(:space_id, "1OyJADqBEgDGb", show_ffmpeg_output: true)
 # download synchronously
 TwitterSpaceDL.download(space)
+
 # download asynchronously
-TwitterSpaceDL.async_download(space)
+TwitterSpaceDL.async_download(space, self())
+# iex > flush
+# {#PID<0.368.0>, %{download_pid: #PID<0.370.0>, space_id: "1OyJADqBEgDGb"}}
+# {#PID<0.368.0>, %{space_id: "1OyJADqBEgDGb"}, :ok}
+# :ok
 ```
 
 Download by space id, use custom filename template and save to `download` directory
@@ -31,8 +41,13 @@ space = TwitterSpaceDL.new!(:space_id, "1OyJADqBEgDGb",
   save_dir: "./download")
 # download synchronously
 TwitterSpaceDL.download(space)
+
 # download asynchronously
-TwitterSpaceDL.async_download(space)
+TwitterSpaceDL.async_download(space, self())
+# iex > flush
+# {#PID<0.368.0>, %{download_pid: #PID<0.370.0>, space_id: "1OyJADqBEgDGb"}}
+# {#PID<0.368.0>, %{space_id: "1OyJADqBEgDGb"}, :ok}
+# :ok
 ```
 
 Init by username, use custom filename template and use plugin module
@@ -44,8 +59,13 @@ space = TwitterSpaceDL.new!(:user, "LaplusDarknesss",
 # you can call this again to download new spaces (if space archive is available)
 # download synchronously
 TwitterSpaceDL.download(space)
+
 # download asynchronously
-TwitterSpaceDL.async_download(space)
+TwitterSpaceDL.async_download(space, self())
+# iex > flush
+# {#PID<0.400.0>, %{download_pid: #PID<0.402.0>, username: "LaplusDarknesss"}}
+# {#PID<0.400.0>, %{username: "LaplusDarknesss"}, [{"https://twitter.com/i/spaces/1mnGedeXloNKX", :ok}]}
+# :ok
 ```
 
 ### Optional arguments
