@@ -619,8 +619,6 @@ defmodule TwitterSpaceDL do
                data: %{
                  audioSpace: %{
                    metadata: %{
-                     state: "Ended",
-                     is_space_available_for_replay: true,
                      media_key: media_key
                    }
                  }

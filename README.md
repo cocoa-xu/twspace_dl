@@ -100,7 +100,7 @@ by adding `twspace_dl` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:twspace_dl, "~> 0.1.1"}
+    {:twspace_dl, "~> 0.1.2"}
   ]
 end
 ```
