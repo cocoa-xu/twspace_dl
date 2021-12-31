@@ -524,9 +524,9 @@ defmodule TwitterSpaceDL do
 
   defp playlist_content(space_id, ets_table, opts) do
     ret_val =
-      with {:ok, playlist_url_str} = playlist_url(space_id, ets_table, opts),
-           {:ok, master_url} = master_url(space_id, ets_table, opts),
-           url_base = Regex.replace(~r/master_playlist.m3u8.*/, master_url, ""),
+      with {:ok, playlist_url_str} <- playlist_url(space_id, ets_table, opts),
+           {:ok, master_url} <- master_url(space_id, ets_table, opts),
+           url_base <- Regex.replace(~r/master_playlist.m3u8.*/, master_url, ""),
            %HTTPotion.Response{body: body, status_code: 200} <-
              HTTPotion.get(playlist_url_str, follow_redirects: true) do
         {:ok, Regex.replace(~r/chunk_/, body, "#{url_base}chunk_")}
@@ -545,7 +545,7 @@ defmodule TwitterSpaceDL do
 
   defp playlist_url(space_id, ets_table, opts) do
     ret_val =
-      with {:ok, master_playlist} = master_url(space_id, ets_table, opts),
+      with {:ok, master_playlist} <- master_url(space_id, ets_table, opts),
            %HTTPotion.Response{body: body, status_code: 200} <-
              HTTPotion.get(master_playlist, follow_redirects: true),
            [_, _, _, suffix | _] <- String.split(body, "\n"),
@@ -626,7 +626,7 @@ defmodule TwitterSpaceDL do
                }
              }} ->
               if (state != "Running" or state != "Ended") do
-                reason = "Space(#{space_id}) is not running or ended"
+                reason = "Space is not running or ended, #{space_id}"
                 Logger.error(reason)
                 {:error, reason}
               else
@@ -646,13 +646,13 @@ defmodule TwitterSpaceDL do
                   {:ok, dyn_url}
                 else
                   _ ->
-                    reason = "Space(#{space_id}) is not available"
+                    reason = "Space is not available, #{space_id}"
                     Logger.error(reason)
                     {:error, reason}
                 end
               end
-            _ ->
-              reason = "Space(#{space_id}) is not running or ended"
+            meta ->
+              reason = "Cannot match JSON structure, #{IO.inpsect(meta)}"
               Logger.error(reason)
               {:error, reason}
           end
