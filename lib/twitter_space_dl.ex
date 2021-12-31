@@ -356,11 +356,11 @@ defmodule TwitterSpaceDL do
          {:ok, tweets} <- recent_tweets(user_id, ets_table, opts) do
       case Regex.scan(~r/https:\/\/twitter.com\/i\/spaces\/\w*/, tweets) do
         [] ->
-          Logger.info("no space tweets found for user_id: #{user_id}")
+          Logger.info("no space tweets found for user: #{username}, user_id: #{user_id}")
           {:ok, [], ets_table}
 
         space_urls ->
-          Logger.info("found #{Enum.count(space_urls)} space tweets for user_id: #{user_id}")
+          Logger.info("found #{Enum.count(space_urls)} space tweets for user: #{username}, user_id: #{user_id}")
 
           space_urls =
             to_plugin_module(opts[:plugin_module], {:space_urls, 0}, space_urls, username, nil)
@@ -371,7 +371,7 @@ defmodule TwitterSpaceDL do
             space_urls
             |> Enum.with_index(1)
             |> Enum.map(fn {[space_url], index} ->
-              Logger.info("[#{index}/#{total}] user_id: #{user_id} url: #{space_url}")
+              Logger.info("[#{index}/#{total}] user: #{username}, user_id: #{user_id}, url: #{space_url}")
 
               with {:ok, space} <- TwitterSpaceDL.new(:space_url, space_url, opts) do
                 if Enum.count(:ets.lookup(ets_table, space_url)) == 0 do
@@ -385,7 +385,7 @@ defmodule TwitterSpaceDL do
                   end
                 else
                   Logger.info(
-                    "[#{index}/#{total}] user_id: #{user_id} url: #{space_url}, already downloaded"
+                    "[#{index}/#{total}] user: #{username}, user_id: #{user_id}, url: #{space_url}, already downloaded"
                   )
 
                   {space_url, :already_downloaded}
@@ -610,7 +610,7 @@ defmodule TwitterSpaceDL do
                  audioSpace: %{metadata: %{state: "Ended", is_space_available_for_replay: false}}
                }
              }} ->
-              reason = "Space has ended but it is not available for replay"
+              reason = "Space has ended but it is not available for replay, #{space_id}"
               Logger.error(reason)
               {:error, reason}
 
