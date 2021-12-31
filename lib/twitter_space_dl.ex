@@ -157,7 +157,8 @@ defmodule TwitterSpaceDL do
     [
       {:template, @filename_template},
       {:save_dir, __DIR__},
-      {:show_ffmpeg_output, false}
+      {:show_ffmpeg_output, false},
+      {:guest_token, nil}
     ]
   end
 
@@ -360,6 +361,7 @@ defmodule TwitterSpaceDL do
           {:ok, [], ets_table}
 
         space_urls ->
+          space_urls = Enum.uniq(space_urls)
           Logger.info("found #{Enum.count(space_urls)} space tweets for user: #{username}, user_id: #{user_id}")
 
           space_urls =
