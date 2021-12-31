@@ -652,7 +652,7 @@ defmodule TwitterSpaceDL do
                 end
               end
             meta ->
-              reason = "Cannot match JSON structure, #{IO.inpsect(meta)}"
+              reason = "Cannot match JSON structure, #{IO.inspect(meta)}"
               Logger.error(reason)
               {:error, reason}
           end
