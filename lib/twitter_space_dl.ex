@@ -627,8 +627,8 @@ defmodule TwitterSpaceDL do
                  }
                }
              }} ->
-              if (state != "Running" or state != "Ended") do
-                reason = "Space is not running or ended, #{space_id}"
+              if (state != "Running" and state != "Ended") do
+                reason = "Space is not running or ended, #{space_id}: #{state}"
                 Logger.error(reason)
                 {:error, reason}
               else
