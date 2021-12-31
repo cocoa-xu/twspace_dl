@@ -619,31 +619,37 @@ defmodule TwitterSpaceDL do
                data: %{
                  audioSpace: %{
                    metadata: %{
-                     state: "Running",
+                     state: state,
                      media_key: media_key
                    }
                  }
                }
              }} ->
-              status_url = @live_video_stream_status_endpoint <> media_key
-
-              with %HTTPotion.Response{body: body, status_code: 200} <-
-                     HTTPotion.get(status_url,
-                       follow_redirects: true,
-                       headers: [
-                         authorization: get_authorization(opts),
-                         cookie: "auth_token="
-                       ]
-                     ),
-                   status <- Jason.decode!(body, keys: :atoms),
-                   %{source: %{location: dyn_url}} <- status,
-                   true <- :ets.insert(ets_table, {@dyn_url, dyn_url}) do
-                {:ok, dyn_url}
+              if (state != "Running" or state != "Ended") do
+                reason = "Space(#{space_id}) is not running or ended"
+                Logger.error(reason)
+                {:error, reason}
               else
-                _ ->
-                  reason = "Space(#{space_id}) is not available"
-                  Logger.error(reason)
-                  {:error, reason}
+                status_url = @live_video_stream_status_endpoint <> media_key
+
+                with %HTTPotion.Response{body: body, status_code: 200} <-
+                       HTTPotion.get(status_url,
+                         follow_redirects: true,
+                         headers: [
+                           authorization: get_authorization(opts),
+                           cookie: "auth_token="
+                         ]
+                       ),
+                     status <- Jason.decode!(body, keys: :atoms),
+                     %{source: %{location: dyn_url}} <- status,
+                     true <- :ets.insert(ets_table, {@dyn_url, dyn_url}) do
+                  {:ok, dyn_url}
+                else
+                  _ ->
+                    reason = "Space(#{space_id}) is not available"
+                    Logger.error(reason)
+                    {:error, reason}
+                end
               end
             _ ->
               reason = "Space(#{space_id}) is not running or ended"
