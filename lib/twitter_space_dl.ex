@@ -619,6 +619,7 @@ defmodule TwitterSpaceDL do
                data: %{
                  audioSpace: %{
                    metadata: %{
+                     state: "Running",
                      media_key: media_key
                    }
                  }
@@ -644,6 +645,10 @@ defmodule TwitterSpaceDL do
                   Logger.error(reason)
                   {:error, reason}
               end
+            _ ->
+              reason = "Space(#{space_id}) is not running or ended"
+              Logger.error(reason)
+              {:error, reason}
           end
       end
 
