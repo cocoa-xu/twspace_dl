@@ -17,13 +17,14 @@ defmodule TwspaceDl.MixProject do
 
   def application do
     [
-      applications: [:httpotion, :jason],
+      applications: [:ibrowse, :httpotion, :jason],
       extra_applications: [:logger]
     ]
   end
 
   defp deps do
     [
+      {:ibrowse, github: "cmullaparthi/ibrowse", tag: "v4.4.2"},
       {:httpotion, "~> 3.1.0"},
       {:jason, "~> 1.2"},
       {:ex_doc, "~> 0.14", only: :dev, runtime: false}
